@@ -40,7 +40,9 @@
     continueRequest: "Would you like to continue with your request?",
     stopped: "No problem, I've stopped the {what}. Is there anything else I can help with?",
     notBooked: "No problem, I haven't booked anything. Is there anything else I can help with?",
-    editWhich: "Of course — what would you like to change?",
+    editWhich: "Of course — what would you like to change? Tap a field below, or just type the change (e.g. “change the time to 4pm”).",
+    askDept: "Which department would you like?",
+    deptChanged: "Great — I've switched it to <b>{dept}</b>.",
     thanksMidFlow: "You're very welcome! 😊",
     helloMidFlow: "Hello! 😊",
     yesIdle: "Great! How can I help you today?",
@@ -862,6 +864,9 @@
     function findChoice(field, tokens, low, lenient) {
       let best = null, bestScore = 0;
       const hits = [];
+      // words right after "not" / "isn't" / "not a" are ruled out ("I'm not new, I'm returning")
+      const NEG = new Set(["not", "isnt", "arent", "wasnt", "dont", "no"]);
+      const negIdx = new Set(tokens.map((t, i) => (NEG.has(tokens[i - 1]) || (NEG.has(tokens[i - 2]) && /^(a|an|the)$/.test(tokens[i - 1])) ? i : -1)).filter((i) => i >= 0));
       (field.options || []).forEach((o, i) => {
         if (DEPT && o.dept && !DEPT.has(o.dept)) return;
         let score = 0;
@@ -877,6 +882,7 @@
           }
         });
         if (lenient && new RegExp(`^\\s*${i + 1}\\s*$`).test(low)) score += 5;
+        if (score > 0 && idx.size && [...idx].every((ix) => negIdx.has(ix))) return;   // only mentioned as "not …"
         if (score > 0) hits.push({ o, idx, phr });
         if (score > bestScore) { best = o; bestScore = score; }
       });
@@ -1262,7 +1268,10 @@
       }
       const n = norm(text);
       if (CRISIS_RE.test(n) || (URGENT.length && hasAny(tokenize(text), URGENT))) return false;   // safety first, never a question
-      const d = detectDept(text);
+      // contact details and short answers to name / contact / date / time never change the department
+      const clean = text.replace(EMAIL_RE, " ").replace(PHONE_RE, " ").replace(/\S+@\S*/g, " ");
+      if (Flow.active && ["name", "contact", "date", "time", "confirm", "editPick"].includes(Flow.step) && tokenize(clean).length <= 3) return false;
+      const d = detectDept(clean);
       if (!d) return false;
       if (d.pick) { DEPT = d.pick; return false; }
       DEPT_ASK = { text, options: d.ask };
@@ -1654,7 +1663,10 @@
     const CONFIRM_CHIPS = ["✅ Yes, confirm", "✏️ Edit details", "✖ Cancel"];
     const SUMMARY = (BK.summary || ["name", "contact", "date", "time", ...(ST ? ["staff"] : []), ...Object.keys(FIELDS)]).map(toContact);
     const labelOf = (k) => (k === "name" ? "Name" : k === "contact" ? "Contact" : k === "date" ? "Date" : k === "time" ? "Time" : k === "staff" ? ST.label : FIELDS[k].label);
-    const EDIT_CHIPS = (BK.editChips || []).map((c) => (c === "Phone" ? "Contact" : c)).filter(Boolean).length ? BK.editChips.map((c) => (c === "Phone" ? "Contact" : c)) : SUMMARY.filter((k) => k !== "staff" || BOOK_STEPS.includes("staff")).map(labelOf);
+    // Everything on the summary can be edited: [chip label, key] — phone and email separately
+    const EDIT_FIELDS = SUMMARY.filter((k) => (k !== "staff" || BOOK_STEPS.includes("staff")) && (k !== "department" || CONFIG.departments))
+      .flatMap((k) => (k === "contact" ? [["Phone", "phone"], ["Email", "email"]] : k === "department" ? [["Department", "department"]] : [[labelOf(k), k]]));
+    const EDIT_CHIPS = EDIT_FIELDS.map(([label]) => label);
     const recStaff = (d) => (d.recId ? STAFF_LIST.find((x) => x.id === d.recId) : null);
     const stepsOf = () => (Flow.active === "book" ? BOOK_STEPS : RESCHED_STEPS);
     const chosenOption = (d) => { for (const id of Object.keys(FIELDS)) { const v = d[id]; if (v && typeof v === "object" && (v.days || v.times)) return v; } return null; };
@@ -1727,6 +1739,10 @@
       if (step === "confirm") return CONFIRM_CHIPS;
       if (step === "editPick") return EDIT_CHIPS;
       const f = FIELDS[step];
+      if (f && DEPTS && step === "service" && DEPT && DEPT.size === 1) {
+        const opts = (f.options || []).filter((o) => DEPT.has(o.dept) && !o.generic).slice(0, 6).map((o) => o.label);
+        if (opts.length) return [...opts, "Other"];
+      }
       if (f) return f.chips || (f.options || []).map((o) => o.label);
       return [];
     }
@@ -1885,7 +1901,7 @@
           const f = FIELDS[id];
           if (!f || !BOOK_STEPS.includes(id)) continue;
           if (f.type === "text") {
-            if (d[id] == null) set(id, v);
+            if (d[id] == null || Flow.step === id) set(id, v);
             if (f.recommend && !d.recId) { const sp = specialistFor(analyze(v).scores); if (sp) d.recId = sp.doc.id; }
           } else if (f.type === "number") {
             if (v < (f.min || 1)) r.errors.push({ field: id, code: "tooSmall" });
@@ -2096,12 +2112,30 @@
 
     function fieldFromText(n) {
       if (ST && new RegExp(`\\b(${[ST.singular, ...(ST.words || []), ...(ST.titles || [])].join("|")})\\b`).test(n)) return BOOK_STEPS.includes("staff") && Flow.active === "book" ? "staff" : null;
+      if (CONFIG.departments && Flow.active === "book" && /\b(department|specialty|speciality)\b/.test(n)) return "department";
+      if (Flow.active === "book") for (const [id, f] of Object.entries(FIELDS)) if (f.validate === "name" && BOOK_STEPS.includes(id) && new RegExp(`\\b(${f.words || f.label.toLowerCase()})\\b`).test(n)) return id;
       if (/\bname\b/.test(n)) return "name";
+      if (Flow.active === "book" && /\b(e ?mail)\b/.test(n) && !/\b(phone|number|mobile)\b/.test(n)) return "email";
+      if (Flow.active === "book" && /\b(phone|number|mobile|cell)\b/.test(n) && !/\be ?mail\b/.test(n)) return "phone";
       if (/\b(phone|number|mobile|email|e mail|contact)\b/.test(n)) return "contact";
       if (/\b(date|day)\b/.test(n)) return "date";
       if (/\b(time|hour)\b/.test(n)) return "time";
-      if (Flow.active === "book") for (const [id, f] of Object.entries(FIELDS)) if (BOOK_STEPS.includes(id) && new RegExp(`\\b(${f.words || f.label.toLowerCase()})\\b`).test(n)) return id;
+      if (Flow.active === "book") for (const [id, f] of Object.entries(FIELDS)) if (BOOK_STEPS.includes(id) && new RegExp(`\\b(${[f.words, f.label.toLowerCase()].filter(Boolean).join("|")})\\b`).test(n)) return id;
       return null;
+    }
+    // Opens one field for editing (from the edit list or "change my email")
+    function openField(f) {
+      resetFails();
+      if (f === "phone" || f === "email") { Flow.contactWant = f; return askStep("contact"); }
+      if (f === "contact") { Flow.contactWant = null; return askStep("contact", { prefix: tx("sure") }); }
+      if (f === "department") { Flow.step = "department"; return bot(tx("sure") + " " + tx("askDept"), Object.values(CONFIG.departments).map((x) => x.label)); }
+      return askStep(f, { prefix: tx("sure") });
+    }
+    function editListHtml() {
+      const d = Flow.data, row = (k, v) => `<div class="summary-row"><span>${esc(k)}</span><span>${esc(v || "—")}</span></div>`;
+      return tx("editWhich") + `<div class="summary">` + EDIT_FIELDS.map(([label, k]) =>
+        row(label, k === "name" ? d.name : k === "phone" ? d.phone : k === "email" ? d.email : k === "date" ? (d.date ? fmtDate(d.date) : "") :
+          k === "time" ? (d.time != null ? timeLabel(d.time) : "") : k === "department" ? deptText(d) : k === "staff" ? (d.staff ? d.staff.name : "") : fieldValueText(k, d[k]))).join("") + `</div>`;
     }
 
     /* ---------- Wrong-input handling ----------
@@ -2146,6 +2180,15 @@
         return bot(tx("stopped", { what: book ? "booking" : "request" }), BOT.quickReplies);
       }
       if (MY_BOOKING_RE.test(n)) { showMyBookings(); return continuePrompt(); }
+      if (step === "department" && DEPTS) {
+        const ids = Object.keys(DEPTS);
+        const pick = deptFromReply(text, ids) || (DEPT && DEPT.size === 1 ? [...DEPT][0] : null);
+        if (!pick) return invalid("department", tx("askDept"), ids.map((id) => DEPTS[id].label));
+        DEPT = new Set([pick]); Flow.data.dept = pick;
+        const cur = [].concat(Flow.data.service || []);
+        if (!cur.length || !cur.every((o) => o && o.dept === pick)) Flow.data.service = null;   // the old service belongs to another department
+        return Flow.data.service ? askStep(nextStep()) : askStep("service", { prefix: tx("deptChanged", { dept: esc(DEPTS[pick].label) }) + " " });
+      }
 
       // "How many bookings?" → set up one booking per person
       if (step === "count") {
@@ -2178,7 +2221,12 @@
       if (book && ((s.book || 0) >= 3 || hasCore(e) || a.tokens.length <= 4) && !a.question) {
         Object.entries(textFieldFrom(a)).forEach(([id, v]) => { if (e.fields[id] == null && Flow.data[id] == null) e.fields[id] = v; });
       }
-      const textAdded = Object.keys(e.fields).some((id) => FIELDS[id] && FIELDS[id].type === "text" && Flow.data[id] == null);
+      if (confirming && !a.question && a.tokens.length <= 5 && (step === "editPick" || EDIT_RE.test(n))) {
+        const field = fieldFromText(n);
+        if (field && !(e.name || e.phone || e.email || e.date || e.time != null)) return openField(field);
+      }
+      // a recognised answer to the field being asked (e.g. "VSP" for insurance) is the answer, not a question
+      const textAdded = Object.keys(e.fields).some((id) => FIELDS[id] && FIELDS[id].type === "text" && (Flow.data[id] == null || id === step));
       const dataCore = !!(e.name || e.phone || e.email || e.emailError || e.phoneError || e.contactPref || e.date || e.dateError || e.time != null || e.timeError || e.staff || e.anyStaff || e.earliest ||
         Object.keys(e.fields).some((id) => FIELDS[id] && FIELDS[id].type !== "text"));
       const data = dataCore || !!e.part || textAdded;
@@ -2248,11 +2296,11 @@
       // 3) Confirmation step
       if (confirming) {
         const field = fieldFromText(n);
-        if (step === "editPick" && field) return askStep(field, { prefix: tx("sure") });
+        if (step === "editPick" && field) return openField(field);
         if (EDIT_RE.test(n)) {
-          if (field) return askStep(field, { prefix: tx("sure") });
+          if (field) return openField(field);
           Flow.step = "editPick";
-          return bot(tx("editWhich"), EDIT_CHIPS);
+          return bot(editListHtml(), EDIT_CHIPS);
         }
         if (YES_RE.test(n) && !NO_RE.test(n)) return submitRequest();
         if (NO_RE.test(n)) { endFlow(); return bot(tx("notBooked"), BOT.quickReplies); }

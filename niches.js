@@ -300,7 +300,7 @@
         steps, rescheduleSteps: ["name", "contact", "date", "time"],
         summary: S.summary || steps,
         closingLine: S.closingLine || "Your appointment for {service} is booked for {date} at {time}",
-        duration: S.duration || 30, slotMinutes: S.slotMinutes || 30, takenPercent: 30, editChips: S.editChips,
+        duration: S.duration || 30, slotMinutes: S.slotMinutes || 30, takenPercent: 30,
         multiPerson: S.multiPerson !== false, maxDaysAhead: 90,
         groupShare: S.groupShare || ["service", "date"],
         fields
@@ -1305,7 +1305,6 @@
       serviceChips: ["Teeth cleaning", "Acne treatment plan", "Comprehensive eye exam", "Well-child checkup", "Annual physical", "Individual therapy", "Other"],
       servicePrompt: "Which <b>treatment or department</b> is this for? Tap one below or tell me in your own words.",
       summary: ["name", "patientType", "department", "service", "date", "time", "contact", "insurance"],
-      editChips: ["Name", "Patient", "Service", "Date", "Time", "Contact", "Insurance"],
       closingLine: "Your {department} appointment for {service} is booked for {date} at {time}",
       safetyWords: ["while pregnant", "during pregnancy", "safe in pregnancy", "safe when pregnant", "safe while breastfeeding", "while breastfeeding",
         "allergic to", "allergic reaction to", "side effect", "side effects", "blood thinner", "blood thinners"],

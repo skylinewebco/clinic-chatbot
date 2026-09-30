@@ -224,7 +224,7 @@
     S.staffSingular = staffSingular; S.staffPlural = staffPlural;
     const services = S.services;
     const prices = {};
-    services.forEach((s) => { prices[s.id] = { label: s.from ? `${s.label} (from)` : s.label, value: s.price }; });
+    services.forEach((s) => { prices[s.id] = { label: s.from ? `${s.label} (from)` : s.label, value: s.price, dept: s.dept }; });
     if (S.consultPrice && !prices.consultation) prices.consultation = { label: "Consultation", value: S.consultPrice };
 
     const cosmeticNote = S.cosmetic ? " Final pricing is confirmed at your consultation." : "";
@@ -232,7 +232,7 @@
       `Our <b>${s.label}</b> is ${s.from ? "from " : ""}<b>${s.price}</b>${s.time ? ` and takes about ${s.time}` : ""}.` +
       (s.extra ? " " + s.extra : "") + cosmeticNote;
     const serviceFaq = services.filter((s) => !s.noIntent).map((s) => ({
-      id: s.id, strong: s.match.concat(s.strongOnly || []), weak: s.weak || [],
+      id: s.id, dept: s.dept, strong: s.match.concat(s.strongOnly || []), weak: s.weak || [],
       answer: svcAnswer(s), chips: [S.cosmetic ? "Book consultation" : "Book Appointment", "Prices"]
     }));
 
@@ -247,7 +247,7 @@
 
     const bookWord = S.cosmetic ? "Book consultation" : "Book Appointment";
     const serviceField = {
-      type: "choice", label: S.serviceLabel || "Service", words: "service|treatment|reason|services|visit", changeLabel: "the service", multi: true, allowOther: true,
+      type: "choice", label: S.serviceLabel || "Service", words: "service|treatment|reason|services|visit", changeLabel: "the service", multi: S.serviceMulti || true, allowOther: true,
       prompt: S.servicePrompt || `What's the <b>reason for your visit</b>? Tap a service below, or tell me in your own words.`,
       shortPrompt: S.servicePrompt || `What's the <b>reason for your visit</b>?`,
       chips: S.serviceChips || services.slice(0, 7).map((s) => s.chip || s.label),
@@ -255,7 +255,7 @@
       shortErrors: ["What's the visit for? Tap an option below or type a few words.", "Just tap a service below, or type a short reason."],
       ack: "<b>{value}</b>",
       options: services.map((s) => ({
-        id: s.id, label: s.label, match: s.match, note: s.note, generic: s.id === "consultation" || s.id === "followUp",
+        id: s.id, label: s.label, match: s.match, note: s.note, dept: s.dept, generic: /(^|_)(consultation|followUp)$/.test(s.id),
         info: svcAnswer(s), chips: [bookWord, "Prices"]
       }))
     };
@@ -288,7 +288,7 @@
     };
     const steps = S.steps || ["name", "patientType", "service", "date", "time", "contact", "insurance"];
     return {
-      id: S.id, industry: S.industry, tagline: S.tagline,
+      id: S.id, industry: S.industry, tagline: S.tagline, departments: S.departments,
       business: S.business,
       theme: { icon: S.icon },
       hours: S.hours,
@@ -300,7 +300,7 @@
         steps, rescheduleSteps: ["name", "contact", "date", "time"],
         summary: S.summary || steps,
         closingLine: S.closingLine || "Your appointment for {service} is booked for {date} at {time}",
-        duration: S.duration || 30, slotMinutes: S.slotMinutes || 30, takenPercent: 30,
+        duration: S.duration || 30, slotMinutes: S.slotMinutes || 30, takenPercent: 30, editChips: S.editChips,
         multiPerson: S.multiPerson !== false, maxDaysAhead: 90,
         groupShare: S.groupShare || ["service", "date"],
         fields
@@ -318,7 +318,7 @@
       },
       urgentMedicineIntent: "medication",
       bot: {
-        name: `${S.business.shortName} Assistant`,
+        name: S.botName || `${S.business.shortName} Assistant`,
         welcome: S.welcome,
         quickReplies: S.quickReplies || [bookWord, "Services & prices", "Insurance", "Timings"],
         tooltip: S.tooltip || "Questions? Chat with us!",
@@ -346,7 +346,8 @@
       faq
     };
   }
-  const add = (spec) => { R[spec.id] = clinic(spec); };
+  const SPECS = [];
+  const add = (spec) => { R[spec.id] = clinic(spec); SPECS.push(spec); };
 
   /* =====================================================================
      1. DENTAL — Bright Smile Dental
@@ -1242,4 +1243,96 @@
     dropFaq: ["afterHours", "hygiene", "companion"],
     overlaps: [["crisisInfo", "emergency"], ["medsCounseling", "medication"], ["confidential", "privacy"], ["slidingScale", "discount"]]
   });
+
+
+  /* =====================================================================
+     DEMO CHATBOT FOR MEDICAL CLINICS — all 15 niches as departments
+     One chat: "my tooth hurts" → Dental, "acne treatment price" → Dermatology…
+     Built automatically from the niche configs above.
+     ===================================================================== */
+  const DEPARTMENTS = {
+    dental: ["Dental", "dental"], dermatology: ["Dermatology", "skin care"], plasticsurgery: ["Plastic Surgery", "plastic surgery"],
+    hairtransplant: ["Hair Restoration", "hair restoration"], medspa: ["MedSpa", "medspa treatments"], eye: ["Eye Care", "eye care"],
+    physio: ["Physiotherapy", "physiotherapy"], chiro: ["Chiropractic", "chiropractic care"], pediatrics: ["Pediatrics", "children's care"],
+    familydoctor: ["Family Medicine", "family medicine"], ent: ["ENT", "ear, nose & throat"], ortho: ["Orthopedics", "orthopedics"],
+    womenshealth: ["Women's Health", "women's health"], lab: ["Diagnostic Lab", "lab tests"], counseling: ["Counseling", "counseling"]
+  };
+  const DEPT_WORDS = {
+    dental: ["tooth", "teeth", "dentist", "dental"], dermatology: ["skin", "dermatologist", "derm"], pediatrics: ["year old", "years old", "yr old", "my son", "my daughter", "my kid", "my child", "toddler", "newborn", "pediatrician"],
+    eye: ["eye", "eyes", "optometrist"], physio: ["physio", "physiotherapist", "physical therapy"], chiro: ["chiro", "chiropractor"],
+    familydoctor: ["gp", "family doctor", "primary care"], ent: ["ent", "ear", "ears", "nose", "throat"], ortho: ["orthopedic", "bone", "bones"],
+    womenshealth: ["gynecologist", "obgyn", "gyno"], lab: ["lab", "blood test", "blood work"], counseling: ["therapist", "counselor", "counselling"],
+    hairtransplant: ["hair transplant", "bald", "balding"], medspa: ["medspa", "med spa", "spa"], plasticsurgery: ["plastic surgery", "plastic surgeon", "cosmetic surgery"]
+  };
+  (function multiClinic() {
+    const dummy = { hours: { weekendText: "" }, staffPlural: "doctors", staffSingular: "doctor" };
+    const shared = new Set([...baseFaq(dummy), ...cosmeticFaq(dummy)].map((f) => f.id));
+    const pre = (sp, id) => (shared.has(id) ? id : `${sp.id}_${id}`);
+    const prices = (sp, txt) => (typeof txt === "string" ? txt.replace(/\{price:(\w+)\}/g, (m, k) => `{price:${sp.id}_${k}}`) : txt);
+    const departments = {}, services = [], faq = [], overlaps = [], topic = new Set(), urgent = new Set(), fearTreatments = [];
+    SPECS.forEach((sp) => {
+      const [label, short] = DEPARTMENTS[sp.id];
+      departments[sp.id] = { label, short, words: [label.toLowerCase(), ...(sp.topicWords || []), ...(DEPT_WORDS[sp.id] || [])] };
+      (sp.topicWords || []).forEach((w) => topic.add(w));
+      (sp.urgentWords || []).forEach((w) => urgent.add(w));
+      sp.services.forEach((x) => services.push({ ...x, id: `${sp.id}_${x.id}`, dept: sp.id,
+        extra: [x.extra, sp.cosmetic ? "Final pricing is confirmed at your consultation." : ""].filter(Boolean).join(" ") || undefined }));
+      (sp.faq || []).forEach((f) => { if (!shared.has(f.id)) faq.push({ ...f, id: `${sp.id}_${f.id}`, dept: sp.id, answer: prices(sp, f.answer) }); });
+      (sp.overlaps || []).forEach(([k, d]) => overlaps.push([pre(sp, k), pre(sp, d)]));
+      (sp.fearTreatments || []).forEach((t) => fearTreatments.push({ ...t, intent: `${sp.id}_${t.intent}` }));
+    });
+    // general "it hurts" → ask where; any department answer wins over it
+    faq.push({ id: "painGeneral", strong: ["pain", "hurts", "hurt", "hurting", "sore", "aching", "ache", "painful"], weak: [],
+      answer: "I'm sorry you're hurting 😟. I can't assess symptoms over chat, but tell me where it hurts — tooth, back, knee, ear, eyes… — and I'll book the right department, or call us at {phone}.",
+      chips: ["Book earliest appointment", "Departments"] });
+    faq.push({ id: "services", action: "services", strong: ["services", "treatments", "what do you offer", "what do you treat", "departments", "department",
+      "specialties", "which departments"], weak: ["offer", "provide", "treat"] });
+    services.forEach((x) => overlaps.push([x.id, "painGeneral"]));
+    services.forEach((x) => ["painPhysio", "painChiro", "injured"].forEach((p) => overlaps.push([x.id, `${x.dept}_${p}`])));
+    faq.forEach((f) => { if (f.dept) overlaps.push([f.id, "painGeneral"]); });
+
+    add({
+      id: "clinic", industry: "Multi-specialty clinic", icon: "cross",
+      tagline: "One assistant for 15 departments — answers questions and books appointments.",
+      botName: "Demo Chatbot for Medical Clinics",
+      business: { name: "Demo Chatbot for Medical Clinics", shortName: "Medical Clinics", address: "500 Medical Center Drive", city: "Springfield, IL",
+        phone: "+1 (555) 010-2000", emergencyPhone: "+1 (555) 010-2099", email: "hello@democlinics.com" },
+      hoursSpec: { week: [1, 2, 3, 4, 5], open: "08:00", close: "19:00", sat: ["09:00", "14:00"] },
+      staffSingular: "doctor",
+      departments, services, faq, overlaps, fearTreatments,
+      serviceMulti: "byDept",
+      serviceList: Object.values(DEPARTMENTS).map(([l]) => l),
+      serviceChips: ["Teeth cleaning", "Acne treatment plan", "Comprehensive eye exam", "Well-child checkup", "Annual physical", "Individual therapy", "Other"],
+      servicePrompt: "Which <b>treatment or department</b> is this for? Tap one below or tell me in your own words.",
+      summary: ["name", "patientType", "department", "service", "date", "time", "contact", "insurance"],
+      editChips: ["Name", "Patient", "Service", "Date", "Time", "Contact", "Insurance"],
+      closingLine: "Your {department} appointment for {service} is booked for {date} at {time}",
+      safetyWords: ["while pregnant", "during pregnancy", "safe in pregnancy", "safe when pregnant", "safe while breastfeeding", "while breastfeeding",
+        "allergic to", "allergic reaction to", "side effect", "side effects", "blood thinner", "blood thinners"],
+      dropWords: { medication: ["prescription", "drug", "drugs"] },
+      topicWords: [...topic], urgentWords: [...urgent],
+      insurance: "Most departments accept major plans, including Aetna, Blue Cross Blue Shield, Cigna, Humana, Medicare, Medicaid and UnitedHealthcare, plus dental and vision plans like Delta Dental, VSP and EyeMed. Cosmetic treatments are self-pay.",
+      payment: "We accept cash, all major credit and debit cards, Apple Pay, Google Pay, and HSA/FSA cards, with financing for larger treatments.",
+      newPatients: "Yes, every department is welcoming new patients! Just tell me what you need and I'll book you in.",
+      firstVisit: "Your first visit starts with a relaxed chat about your health and goals, then an exam — about 30–45 minutes depending on the department. Please arrive 10 minutes early.",
+      bring: "Please bring a photo ID, your insurance card, a list of your medications, and any recent test results or scans.",
+      cancel: "We kindly ask for 24 hours' notice to cancel or reschedule — late cancellations may have a small fee.",
+      parking: "Free parking is available in the Medical Center lot, with accessible spaces right by the entrance.",
+      downtime: "Recovery depends on the treatment — your specialist will give you a personal recovery plan at your consultation.",
+      durationText: "Most appointments take 20–45 minutes, depending on the department and treatment — tell me the treatment and I'll give you the details.",
+      welcome: "Hi! 👋 Welcome to the Demo Chatbot for Medical Clinics. Ask me about any treatment, prices, timings, or book an appointment.",
+      quickReplies: ["Book Appointment", "Departments", "Insurance", "Timings"],
+      tooltip: "Questions? Ask our clinic assistant!",
+      replies: {
+        servicesText: "We have 15 departments: {list}. Ask me about any treatment or price, or I can book you in!",
+        pricesPickDept: "Prices depend on the treatment — just ask, for example “teeth cleaning price”, “acne treatment price” or “eye exam price”, and I'll tell you right away.",
+        pricesIntroDept: "Here are our {dept} prices:",
+        pricesNote: "Insurance may cover part of the cost. Cosmetic prices are starting prices, confirmed at your consultation."
+      }
+    });
+    // "outcome" & co. from the cosmetic niches stay available (never guarantee results)
+    const cfg = R.clinic;
+    cosmeticFaq({ staffSingular: "specialist", downtime: "Recovery depends on the treatment — your specialist will give you a personal recovery plan at your consultation." })
+      .filter((f) => ["outcome", "downtime", "candidate", "giftCards"].includes(f.id)).forEach((f) => cfg.faq.push(f));
+  })();
 })();

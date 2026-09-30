@@ -4,7 +4,18 @@ A friendly 24/7 AI assistant for clinics and medical businesses. It answers pati
 
 **Live demo:** https://skylinewebco.github.io/clinic-chatbot/
 
-## Niches and direct links
+## The main link: Demo Chatbot for Medical Clinics
+
+The main link opens **one chatbot for all 15 departments**, and the chat opens straight away.
+
+- **It finds the department from each message.** "my tooth hurts" goes to Dental, "acne treatment price" to Dermatology and "how much is an eye exam" to Eye Care. You can switch topics freely in the same chat.
+- **It asks one short question when unsure.** If a message fits two departments, it asks something like "Is this for skin care or medspa treatments?"
+- **Bookings include the department.** Several departments can be booked at once, e.g. "a teeth cleaning and an eye exam", with one combined summary at the end.
+- **Everything else works the same:** the safety rules, message batching, "Seen" ticks, phone/email, and the goodbye.
+
+Departments: Dental, Dermatology, Plastic Surgery, Hair Restoration, MedSpa, Eye Care, Physiotherapy, Chiropractic, Pediatrics, Family Medicine, ENT, Orthopedics, Women's Health, Diagnostic Lab, Counseling.
+
+## Single-specialty links (for one client)
 
 | Niche | Business (fictional) | Direct link |
 |---|---|---|
@@ -24,11 +35,9 @@ A friendly 24/7 AI assistant for clinics and medical businesses. It answers pati
 | Diagnostic lab | QuickTest Diagnostic Lab | `?niche=lab` |
 | Counseling | Calm Mind Counseling | `?niche=counseling` |
 
-**Personalise any link for a prospect:** `?niche=dental&name=Smith Family Dental&city=Boston, MA&phone=+1 617 555 0100`. The name, city and phone replace the defaults everywhere, and the tab title becomes "Smith Family Dental – AI Assistant".
+**Personalise any single-specialty link:** `?niche=dental&name=Smith Family Dental&city=Boston, MA&phone=+1 617 555 0100`. The name, city and phone replace the defaults everywhere, and the tab title becomes "Smith Family Dental – AI Assistant".
 
-- With no parameters, the page shows the landing page with all 15 niches.
-- With `?niche=…`, it shows a clean page for that single business and opens the chat automatically.
-- The **Owner view** button (bottom left) shows the bookings the chatbot has received, live.
+The **Owner view** button (bottom left) shows the bookings the chatbot has received, live.
 
 ## Safety rules (built in)
 
@@ -59,10 +68,11 @@ A friendly 24/7 AI assistant for clinics and medical businesses. It answers pati
 ## Add it to any clinic website
 
 ```html
+<!-- one specialty -->
 <script src="chatbot.js" data-niche="dental" data-name="Smith Family Dental" data-city="Boston, MA" data-phone="+1 617 555 0100"></script>
 ```
 
-`chatbot.js` loads `niches.js` from the same folder automatically. The widget lives in a Shadow DOM, so it never clashes with the site's styles.
+Use `data-niche="clinic"` for the all-departments chatbot. `chatbot.js` loads `niches.js` from the same folder automatically. The widget lives in a Shadow DOM, so it never clashes with the site's styles.
 
 ## New client in 3 steps
 
@@ -96,8 +106,8 @@ In production, send it to your backend, email, Google Sheets or CRM. See `submit
 ## Files
 
 - `chatbot.js`: the engine (design, understanding, booking flow, safety)
-- `niches.js`: the 15 niche configs (built from one shared clinic knowledge base)
-- `index.html`: the landing page, single-business pages and Owner view
+- `niches.js`: the 15 niche configs, plus the combined "clinic" config built from them
+- `index.html`: the Demo Chatbot for Medical Clinics page, the single-specialty pages and the Owner view
 - `netlify.toml`: Netlify settings
 
 ---

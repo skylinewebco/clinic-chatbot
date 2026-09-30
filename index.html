@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-<title>Clinic AI Chatbots by Skyline Web Co</title>
-<meta name="description" content="AI chatbot demos for 15 kinds of clinics and medical businesses — answers patient questions and books appointments 24/7.">
+<title>Demo Chatbot for Medical Clinics</title>
+<meta name="description" content="Demo Chatbot for Medical Clinics — one AI assistant for 15 departments that answers patient questions and books appointments 24/7.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -86,18 +86,7 @@
 </head>
 <body>
   <main class="wrap">
-    <!-- Landing page (no parameters) -->
-    <section id="landing" hidden>
-      <div class="brand"><i></i>Skyline Web Co · Live demos</div>
-      <h1>Clinic AI Chatbots by <span>Skyline Web Co</span></h1>
-      <p class="lead">A friendly 24/7 assistant for clinics and medical businesses. It answers patient questions, shares prices and insurance info, and books appointments — while staying safe: no diagnoses, no medication advice, and emergencies go straight to 911.</p>
-      <div class="pills"><span>15 specialties</span><span>60+ Q&amp;As each</span><span>Books appointments</span><span>Safety-first replies</span><span>Mobile-friendly</span></div>
-      <div class="grid" id="cards"></div>
-      <p class="hint">Tap a card to chat, or open its direct link. Tip: add <code>&amp;name=Your Clinic&amp;city=Your City&amp;phone=Your Number</code> to any direct link to personalise it.</p>
-      <p class="foot">© Skyline Web Co · All businesses are fictional, for demonstration only.</p>
-    </section>
-
-    <!-- Single business page (?niche=dental&name=…&city=…&phone=…) -->
+    <!-- Main link: the "Demo Chatbot for Medical Clinics" (all 15 departments) · ?niche=dental&name=… : one specialty -->
     <section id="solo" class="solo" hidden>
       <div class="ico" id="soloIco"></div>
       <div class="ind" id="soloInd"></div>
@@ -170,51 +159,23 @@
       window.addEventListener("demochatbot:request", () => { renderOwner(); ownerBtn.animate([{ transform: "scale(1)" }, { transform: "scale(1.08)" }, { transform: "scale(1)" }], { duration: 400 }); });
       window.addEventListener("storage", renderOwner);
 
-      /* ---------- Single business page ---------- */
-      if (cfgs[niche]) {
-        currentKey = niche;
-        const c = cfgs[niche];
-        const api = CB.mount(niche, { open: true, openDelay: 600, overrides });
-        const b = api ? api.business : c.business;
-        document.title = `${b.name} – AI Assistant`;
-        document.getElementById("soloIco").innerHTML = CB.icon(c.theme.icon, 30);
-        document.getElementById("soloInd").textContent = c.industry;
-        document.getElementById("soloName").textContent = b.name;
-        const tel = "tel:" + b.phone.replace(/[^\d+]/g, "");
-        document.getElementById("soloFacts").innerHTML =
-          `<span>📍 ${esc(b.address)}, ${esc(b.city)}</span><span>📞 <a href="${esc(tel)}">${esc(b.phone)}</a></span><span>🕘 ${esc(c.hours.shortDisplay)}</span>`;
-        document.getElementById("soloCta").addEventListener("click", () => CB.current && CB.current.open());
-        document.getElementById("solo").hidden = false;
-        renderOwner();
-        return;
-      }
-
-      /* ---------- Landing page ---------- */
-      const landing = document.getElementById("landing"), grid = document.getElementById("cards");
-      landing.hidden = false;
-      ORDER.filter((k) => cfgs[k]).forEach((k) => {
-        const c = cfgs[k];
-        const card = document.createElement("div");
-        card.className = "card"; card.tabIndex = 0; card.setAttribute("role", "button"); card.dataset.niche = k;
-        card.setAttribute("aria-label", `Try the ${c.industry} chatbot: ${c.business.name}`);
-        card.innerHTML = `<div class="ico">${CB.icon(c.theme.icon, 23)}</div><div class="ind">${esc(c.industry)}</div><div class="biz">${esc(c.business.name)}</div>` +
-          `<div class="tag">${esc(c.tagline || "")}</div><div class="row"><span class="try">Try the chatbot <b>→</b></span>` +
-          `<a class="link" href="?niche=${k}" target="_blank" rel="noopener" title="Open the direct link for this clinic">Direct link ↗</a></div>`;
-        const choose = () => select(k);
-        card.addEventListener("click", (e) => { if (!e.target.closest(".link")) choose(); });
-        card.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".link")) { e.preventDefault(); choose(); } });
-        grid.appendChild(card);
-      });
-      function select(k) {
-        grid.querySelectorAll(".card").forEach((el) => el.classList.toggle("active", el.dataset.niche === k));
-        CB.mount(k, { open: true, openDelay: 150, onSwitch: backToCards });
-        if (!owner.hidden) renderOwner();
-      }
-      function backToCards() {
-        grid.scrollIntoView({ behavior: "smooth", block: "start" });
-        const active = grid.querySelector(".card.active");
-        if (active) active.focus({ preventScroll: true });
-      }
+      /* ---------- One page: the medical clinics chatbot, or one specialty with ?niche=… ---------- */
+      const key = cfgs[niche] && niche !== "clinic" ? niche : "clinic";
+      currentKey = key;
+      const c = cfgs[key];
+      const api = CB.mount(key, { open: true, openDelay: 600, overrides: key === "clinic" ? {} : overrides });
+      const b = api ? api.business : c.business;
+      document.title = key === "clinic" ? b.name : `${b.name} – AI Assistant`;
+      document.getElementById("soloIco").innerHTML = CB.icon(c.theme.icon, 30);
+      document.getElementById("soloInd").textContent = key === "clinic" ? "15 departments · one assistant" : c.industry;
+      document.getElementById("soloName").textContent = b.name;
+      if (key === "clinic") document.getElementById("soloLine").textContent =
+        "Dental, skin, eyes, kids, physio, lab tests and more — ask about any treatment, price or timing, or book an appointment in any department.";
+      const tel = "tel:" + b.phone.replace(/[^\d+]/g, "");
+      document.getElementById("soloFacts").innerHTML =
+        `<span>📍 ${esc(b.address)}, ${esc(b.city)}</span><span>📞 <a href="${esc(tel)}">${esc(b.phone)}</a></span><span>🕘 ${esc(c.hours.shortDisplay)}</span>`;
+      document.getElementById("soloCta").addEventListener("click", () => CB.current && CB.current.open());
+      document.getElementById("solo").hidden = false;
       renderOwner();
     })();
   </script>

@@ -34,6 +34,8 @@
     slotTaken: "Sorry, {time} is already booked — the nearest free times are {options}. Which one works for you?",
     requestNoted: "I've noted your request for {request} — our team will confirm it for you.",
     skipLabel: "Not provided",
+    deptAsk2: "Is this for {a} or {b}?",
+    deptAskN: "Which department is this for — {list}?",
     continueBooking: "Would you like to continue with your booking?",
     continueRequest: "Would you like to continue with your request?",
     stopped: "No problem, I've stopped the {what}. Is there anything else I can help with?",
@@ -632,6 +634,67 @@
     const NON_ANSWER = new Set(["book", "reschedule", "greeting", "thanks", "bye"]);
     const PRIORITY = INTENTS.filter((i) => i.priority).sort((a, b) => a.priority - b.priority);
 
+    /* ---------- Departments: one chatbot covering several specialties ---------- */
+    const DEPTS = CONFIG.departments || null;              // { dental: { label, short, words } … }
+    let DEPT = null;                                         // the department(s) the chat is about: a Set of ids
+    let DEPT_ASK = null;                                     // { text, options } while asking "dental or skin care?"
+    function matchIdx(tokens, w) {                           // which words of the message a keyword uses
+      const out = new Set();
+      for (let i = 0; i < tokens.length; i++) {
+        if (!wordMatch(tokens[i], w[0])) continue;
+        const hit = [i]; let j = 1, pos = i + 1, gap = 0;
+        while (j < w.length && pos < tokens.length && gap <= 2) { if (wordMatch(tokens[pos], w[j])) { hit.push(pos); j++; gap = 0; } else gap++; pos++; }
+        if (j === w.length) hit.forEach((x) => out.add(x));
+      }
+      return out;
+    }
+    const DEPT_KW = {};
+    if (DEPTS) {
+      // words that belong to one department: its topic words, its services and its own Q&As
+      // (a Q&A word used by several departments, like "pain", doesn't point to any one of them)
+      const faqWords = {};
+      INTENTS.forEach((i) => { if (i.dept) (i.strong || []).forEach((w) => { (faqWords[w] = faqWords[w] || new Set()).add(i.dept); }); });
+      Object.keys(DEPTS).forEach((id) => {
+        const words = new Set(DEPTS[id].words || []);
+        Object.entries(faqWords).forEach(([w, ds]) => { if (ds.size === 1 && ds.has(id)) words.add(w); });
+        Object.values(FIELDS).forEach((f) => (f.options || []).forEach((o) => { if (o.dept === id) [o.label, ...(o.match || [])].forEach((w) => words.add(w)); }));
+        DEPT_KW[id] = { kws: kwList([...words]), topic: kwList(DEPTS[id].words || []) };
+      });
+    }
+    // → { pick: Set of department ids } or { ask: [ids] } (the same words fit several departments) or null
+    function detectDept(text) {
+      if (!DEPTS) return null;
+      const tokens = tokenize(text);
+      const groups = Object.entries(DEPT_KW).map(([id, k]) => {
+        const idx = new Set(); k.kws.forEach((w) => matchIdx(tokens, w).forEach((x) => idx.add(x)));
+        const topic = k.topic.filter((w) => matchIdx(tokens, w).size).length;
+        return { id, idx, score: idx.size + topic * 0.5 };
+      }).filter((g) => g.idx.size).sort((a, b) => b.score - a.score);
+      if (!groups.length) return null;
+      const g0 = groups[0];
+      const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+      const ties = groups.filter((g) => g !== g0 && g.score === g0.score && same(g.idx, g0.idx));
+      if (ties.length) {
+        const all = [g0, ...ties].map((g) => g.id);
+        const cur = DEPT && all.find((id) => DEPT.has(id));        // keep talking about the current department
+        return cur ? { pick: new Set([cur]) } : { ask: all };
+      }
+      const pick = new Set([g0.id]), covered = new Set(g0.idx);    // "a cleaning and an eye exam" → both departments
+      groups.slice(1).forEach((g) => { if ([...g.idx].some((x) => !covered.has(x))) { pick.add(g.id); g.idx.forEach((x) => covered.add(x)); } });
+      return { pick };
+    }
+    function deptFromReply(text, options) {
+      const n = norm(text), tokens = tokenize(text);
+      return options.find((id) => [DEPTS[id].label, DEPTS[id].short, id].some((w) => n.includes(norm(w)))) ||
+        options.find((id) => DEPT_KW[id].topic.some((w) => matchIdx(tokens, w).size)) || null;
+    }
+    const deptText = (d) => {
+      if (!DEPTS) return "";
+      const ids = [...new Set([].concat(d.service || []).map((o) => o && o.dept).filter(Boolean))];
+      if (!ids.length && d.dept) ids.push(d.dept);
+      return ids.map((id) => DEPTS[id].label).join(" + ");
+    };
+
     function scoreIntent(tokens, intent) {
       let score = 0;
       const perToken = new Map();                    // each word contributes once per intent
@@ -656,7 +719,7 @@
     // Scores a message against every intent and flags special situations.
     function analyze(text) {
       const n = norm(text), tokens = tokenize(text), scores = {};
-      INTENTS.forEach((i) => { scores[i.id] = tokens.length ? scoreIntent(tokens, i) : 0; });
+      INTENTS.forEach((i) => { scores[i.id] = tokens.length && !(DEPT && i.dept && !DEPT.has(i.dept)) ? scoreIntent(tokens, i) : 0; });
       const a = {
         text, n, tokens, scores,
         question: text.includes("?") || Q_START.test(n),
@@ -800,6 +863,7 @@
       let best = null, bestScore = 0;
       const hits = [];
       (field.options || []).forEach((o, i) => {
+        if (DEPT && o.dept && !DEPT.has(o.dept)) return;
         let score = 0;
         // single words: exact / prefix / one typo only ("something" must not become "smoothing")
         const strictMatch = (t, kw) => t === kw || (kw.length >= 4 && t.startsWith(kw) && t.length - kw.length <= 3) || (kw.length >= 6 && Math.abs(t.length - kw.length) <= 1 && editDistance(t, kw) <= 1);
@@ -1181,8 +1245,31 @@
         const t = row.querySelector("time");
         if (t && !t.querySelector(".seen")) t.insertAdjacentHTML("beforeend", ` · <span class="seen">Seen ✓</span>`);
       });
-      if (Flow.active) handleFlow(combined); else respond(combined);
+      if (!deptGate(combined)) route(combined);
       saveState();
+    }
+    const route = (t) => (Flow.active ? handleFlow(t) : respond(t));
+    // Multi-department bot: work out which department a message is about ("my tooth hurts" → Dental).
+    // Returns true when it asked "Is this for dental or skin care?" instead of answering.
+    function deptGate(text) {
+      if (!DEPTS) return false;
+      if (DEPT_ASK) {
+        const ask = DEPT_ASK; DEPT_ASK = null;
+        // a short answer ("dental", "skin", "for my son") settles it; a new question is simply answered as usual
+        let pick = tokenize(text).length <= 4 ? deptFromReply(text, ask.options) : null;
+        if (!pick && tokenize(text).length <= 3) { const d = detectDept(text); if (d && d.pick && d.pick.size === 1 && ask.options.includes([...d.pick][0])) pick = [...d.pick][0]; }
+        if (pick) { DEPT = new Set([pick]); route(ask.text); return true; }
+      }
+      const n = norm(text);
+      if (CRISIS_RE.test(n) || (URGENT.length && hasAny(tokenize(text), URGENT))) return false;   // safety first, never a question
+      const d = detectDept(text);
+      if (!d) return false;
+      if (d.pick) { DEPT = d.pick; return false; }
+      DEPT_ASK = { text, options: d.ask };
+      const names = d.ask.map((id) => DEPTS[id].short);
+      bot(d.ask.length === 2 ? tx("deptAsk2", { a: names[0], b: names[1] }) : tx("deptAskN", { list: names.slice(0, 4).join(", ") }),
+        d.ask.slice(0, 6).map((id) => DEPTS[id].label));
+      return true;
     }
     // Still typing → keep waiting (every keystroke restarts the timer)
     ["input", "keydown", "compositionupdate"].forEach((ev) => input.addEventListener(ev, () => { if (pending.length) scheduleFlush(TEST.batchMs); }));
@@ -1250,7 +1337,8 @@
         const html = [...chatBody.children].filter((el) => !el.classList.contains("typing")).map((el) => el.outerHTML).join("");
         sessionStorage.setItem(SAVE_KEY, JSON.stringify({
           html, chips: [...chipsEl.children].map((b) => b.textContent), open: isOpen(), started, pending,
-          flow: { ...Flow, data: serData(Flow.data), asked: [...Flow.asked] }, session: SESSION
+          flow: { ...Flow, data: serData(Flow.data), asked: [...Flow.asked] }, session: SESSION,
+          dept: typeof DEPT !== "undefined" && DEPT ? [...DEPT] : null, deptAsk: typeof DEPT_ASK !== "undefined" ? DEPT_ASK : null
         }));
       } catch (err) { /* storage unavailable — ignore */ }
     }
@@ -1263,6 +1351,7 @@
       setChips(s.chips || []);
       Object.assign(Flow, s.flow, { data: deserData(s.flow.data), asked: new Set(s.flow.asked || []) });
       Object.assign(SESSION, s.session || {});
+      DEPT = s.dept ? new Set(s.dept) : null; DEPT_ASK = s.deptAsk || null;
       started = true;
       restoring = false;
       if (s.pending && s.pending.length) { pending = s.pending; scheduleFlush(300); }
@@ -1286,6 +1375,13 @@
     const priceNums = (p) => (p.value.match(/\d[\d,]*/g) || []).map((x) => +x.replace(/,/g, ""));
 
     function pricesHtml() {
+      if (DEPTS && !DEPT) return fill(T.pricesPickDept || T.pricesIntro);
+      if (DEPTS) {
+        const list = Object.values(CONFIG.prices || {}).filter((p) => !p.dept || DEPT.has(p.dept));
+        return `${fill(T.pricesIntroDept || T.pricesIntro, { dept: joinAnd([...DEPT].map((id) => DEPTS[id].label)) })}<div class="price-list">` +
+          list.map((p) => `<div class="pl-row"><span>${esc(p.label)}</span><span>${esc(p.value)}</span></div>`).join("") + `</div>` +
+          (T.pricesNote ? `<div class="pl-note">${fill(T.pricesNote)}</div>` : "");
+      }
       const rows = Object.values(CONFIG.prices || {}).map((p) => `<div class="pl-row"><span>${esc(p.label)}</span><span>${esc(p.value)}</span></div>`).join("");
       return `${fill(T.pricesIntro)}<div class="price-list">${rows}</div>` + (T.pricesNote ? `<div class="pl-note">${fill(T.pricesNote)}</div>` : "");
     }
@@ -1444,7 +1540,9 @@
       if (ids.includes("pain")) ids = ids.filter((id) => id !== "emergency");
       (BOT.overlaps || []).forEach(([keep, drop]) => { if (ids.includes(keep)) ids = ids.filter((id) => id !== drop); });
       if (!ids.length) return null;
+      if (optLead) ids = ids.filter((id) => !(BOT.optionIntents || []).includes(id)) ;   // the option's details are already there
       ids = ids.slice(0, 3);
+      if (!ids.length) return { html: optLead.replace(/<br><br>$/, ""), chips: [BOT.quickReplies[0]] };
       return { html: optLead + ids.map(answerHtml).join("<br><br>"), chips: intentById[ids[0]].chips || BOT.quickReplies };
     }
 
@@ -1702,6 +1800,7 @@
           if (k === "time") return row("Time", timeLabel(d.time));
           if (k === "staff") return row(ST.label, d.staff ? `${d.staff.name} (${d.staff.specialty})` : T.anyAvailable);
           if (k === "name") return row("Name", d.name);
+          if (k === "department") return deptText(d) ? row("Department", deptText(d)) : "";
           if (k === "contact") return (d.phone ? row("Phone", d.phone) : "") + (d.email ? row("Email", d.email) : "");
           return d[k] == null ? "" : row(labelOf(k), fieldValueText(k, d[k]));
         }).join("") + (d.request ? row("Request", `${d.request} (team will confirm)`) : "") + `</div>`;
@@ -1713,6 +1812,7 @@
         if (k === "time") return ["Time", d.time != null ? timeLabel(d.time) : ""];
         if (k === "staff") return [ST.label, d.staff ? `${d.staff.name} (${d.staff.specialty})` : ""];
         if (k === "name") return ["Name", d.name || ""];
+        if (k === "department") return ["Department", deptText(d)];
         return [labelOf(k), fieldValueText(k, d[k])];
       }).concat(d.request ? [["Request", `${d.request} (team will confirm)`]] : []);
     }
@@ -1793,7 +1893,16 @@
             else set(id, v);
           } else if (f.type === "choice") {
             let val = v;
-            if (Array.isArray(v) && f.multi === "bookings") {             // two properties / classes → a second booking for the rest
+            if (Array.isArray(v) && f.multi === "byDept") {               // cleaning + eye exam → a dental and an eye care appointment
+              const groups = [];
+              v.forEach((o) => { const g = groups.find((x) => x.dept === o.dept); if (g) g.opts.push(o); else groups.push({ dept: o.dept, opts: [o] }); });
+              const one = (g) => (g.opts.length === 1 ? g.opts[0] : g.opts);
+              val = one(groups[0]);
+              groups.slice(1).forEach((g) => {
+                const who = `${DEPTS[g.dept].label} — ${g.opts.map((o) => o.label).join(" + ")}`;
+                if (!Flow.pending.some((p) => p.who === who)) Flow.pending.push({ who, preset: { [id]: one(g) }, samePerson: true });
+              });
+            } else if (Array.isArray(v) && f.multi === "bookings") {             // two properties / classes → a second booking for the rest
               val = v[0];
               v.slice(1).forEach((opt) => { if (!Flow.pending.some((p) => p.preset && p.preset[id] === opt)) Flow.pending.push({ who: opt.label, preset: { [id]: opt }, samePerson: true }); });
             }
@@ -1808,6 +1917,7 @@
         }
       }
       if (e.part && e.time == null) d.part = e.part;
+      if (DEPTS && book && DEPT && DEPT.size === 1) d.dept = [...DEPT][0];   // department for a reason typed in own words
 
       // Staff: must work on the chosen date
       if (book && ST) {
@@ -2095,6 +2205,9 @@
           if (!nameValid(c)) return invalid(step, fill(f.invalid), chipsFor(step));
           return advance(applyEntities({ fields: { [step]: titleCase(c) } }), { step });
         }
+        if (e.fields[step]) return advance(applyEntities({ fields: { [step]: e.fields[step] } }), { step });   // recognised, e.g. "VSP"
+        if (f.optional && (sc(a, "thanks") >= 3 || sc(a, "bye") >= 3) && a.tokens.length <= 3)                // "thanks" / "that's all" = nothing to add
+          return advance(applyEntities({ fields: { [step]: f.skipValue || T.skipLabel } }), { step });
         if (a.gibberish || text.trim().length < 2) return invalid(step, fill(f.invalid), chipsFor(step));
         const mapped = textFieldFrom(a)[step];                         // "cleaning" → "Teeth cleaning"
         return advance(applyEntities({ fields: { [step]: mapped || cap(text.trim().replace(/\s+/g, " ").slice(0, 120)) } }), { step });
@@ -2219,6 +2332,7 @@
       } else if (rec.type === "new") {
         const vals = { noun, date: fmtShort(d.date), time: timeLabel(d.time), staffWith: d.staff ? ` with ${d.staff.name}` : "" };
         Object.keys(FIELDS).forEach((id) => { let v = fieldValueText(id, d[id]); if (FIELDS[id].closingLower) v = v.toLowerCase(); vals[id] = v; });
+        vals.department = deptText(d);
         const summary = fill(BK.closingLine || T.closingLine, vals);
         const extra = T.closingExtra ? " " + T.closingExtra : "";
         bot(tx("closing", { first: esc(firstName(d.name)), summary, contactLine, extra, signoff: T["signoff" + how] }) + (rec.ics ? "<br>" + calBtn(rec, T.calendarButton) : ""));
@@ -2292,6 +2406,7 @@
       bot(esc(BOT.welcome.replace("{business}", B.name)), BOT.quickReplies);
     }
     function restart() {                                     // "Start new chat"
+      DEPT = null; DEPT_ASK = null;
       session++; queue = Promise.resolve(); endFlow();
       clearTimeout(batchTimer); pending = []; pendingRows.length = 0;
       SESSION.phase = null;

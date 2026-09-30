@@ -1,7 +1,6 @@
-# Static site: no build step, publish the project root
+# Netlify: static site — no build step, publish the project root
 [build]
   publish = "."
-  command = ""
 
 [[headers]]
   for = "/*.js"
